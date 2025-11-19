@@ -5,6 +5,7 @@ return [
     'app' => [
         'name' => 'Deepfake Defense Training',
         'default_video_url' => 'https://videos.pexels.com/video-files/3130449/3130449-uhd_2560_1440_25fps.mp4',
+        'beta_key' => 'BetaKeyChangeMe',
     ],
     'db' => [
         'host' => getenv('DB_HOST') ?: '127.0.0.1',

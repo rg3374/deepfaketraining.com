@@ -37,6 +37,10 @@ Run the script again any time you update the source files; duplicates are avoide
 
 The application reads MySQL settings from environment variables (`DB_HOST`, `DB_NAME`, etc.). For quick local development, edit `/Users/nhunt/Desktop/deepfaketraining.com/config.php` and adjust the defaults.
 
+### Beta access gate
+
+All pages are protected by a beta key so unpublished builds stay private. Update `app.beta_key` inside `config.php` (default `BetaKeyChangeMe`) and share it only with trusted testers. Anyone visiting the site will be redirected to `/beta.php` until they enter the key; once verified, their session proceeds normally and a secure cookie keeps them authorized for 30 days (unless you change the key). Clear the session via the “Reset beta session” link on that page or by deleting the browser cookies.
+
 ## Run locally
 
 From the project root:
