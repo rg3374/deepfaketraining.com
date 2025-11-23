@@ -17,6 +17,21 @@ function normalize_terminal_output(string $text): string
     return str_replace("\n", "\r\n", $text);
 }
 
+function payload_macro_template(): array
+{
+    return [
+        'active' => false,
+        'step' => null,
+        'inputs' => [
+            'ip' => null,
+            'port' => null,
+            'doc' => null,
+            'attack' => null,
+            'payload' => null,
+        ],
+    ];
+}
+
 function payload_macro_source(): string
 {
     return <<<'MACRO'
@@ -84,6 +99,18 @@ PS>
 MACRO;
 }
 
+function payload_prompt_for_step(?string $step): ?string
+{
+    return match ($step) {
+        'ip' => 'Enter IP Address: ',
+        'port' => 'Enter Port Number: ',
+        'doc' => 'Enter the name of the document (Do not include a file extension): ',
+        'attack' => 'Select Attack Number & Press Enter: ',
+        'payload' => 'Select Payload Number & Press Enter: ',
+        default => null,
+    };
+}
+
 function console_default_state(): array
 {
     return [
@@ -121,17 +148,7 @@ function payload_default_state(): array
         'files' => ['Readme.txt'],
         'downloaded' => false,
         'download_name' => null,
-        'macro' => [
-            'active' => false,
-            'step' => null,
-            'inputs' => [
-                'ip' => null,
-                'port' => null,
-                'doc' => null,
-                'attack' => null,
-                'payload' => null,
-            ],
-        ],
+        'macro' => payload_macro_template(),
         'trojan' => null,
         'complete' => false,
     ];
@@ -288,6 +305,19 @@ function payload_handle_command(string $command, array $state): array
     $output = '';
     $clear = false;
 
+    if ($command === '__CTRL_C__') {
+        $state['macro'] = payload_macro_template();
+        $output = '^C';
+        return [
+            'state' => $state,
+            'output' => normalize_terminal_output($output),
+            'clear' => false,
+            'prompt_again' => false,
+            'prompt_text' => null,
+            'awaiting_prompt' => false,
+        ];
+    }
+
     if ($state['macro']['active']) {
         return payload_handle_macro_input($command, $state);
     }
@@ -295,6 +325,8 @@ function payload_handle_command(string $command, array $state): array
     if ($command === '') {
         return ['state' => $state, 'output' => '', 'clear' => false];
     }
+
+    $promptText = null;
 
     switch (true) {
         case strcasecmp($command, 'help') === 0:
@@ -387,16 +419,11 @@ EOT;
                 $output = "File '{$invoked}' not found. Execute .\\{$scriptName}";
                 break;
             }
+            $state['macro'] = payload_macro_template();
             $state['macro']['active'] = true;
             $state['macro']['step'] = 'ip';
-            $state['macro']['inputs'] = [
-                'ip' => null,
-                'port' => null,
-                'doc' => null,
-                'attack' => null,
-                'payload' => null,
-            ];
-            $output = 'Enter IP Address:';
+            $promptText = payload_prompt_for_step('ip');
+            $output = '';
             break;
         case preg_match('/^(?:type|get-content|gc)\s+(.+)/i', $command, $typeMatch) === 1:
             $target = trim($typeMatch[1]);
@@ -429,78 +456,84 @@ EOT;
             break;
     }
 
-    return ['state' => $state, 'output' => normalize_terminal_output($output), 'clear' => $clear];
+    return [
+        'state' => $state,
+        'output' => normalize_terminal_output($output),
+        'clear' => $clear,
+        'prompt_again' => false,
+        'prompt_text' => $promptText,
+        'awaiting_prompt' => $state['macro']['active'],
+    ];
 }
 
 function payload_handle_macro_input(string $command, array $state): array
 {
     $step = $state['macro']['step'];
     $output = '';
+    $promptAgain = false;
+    $promptText = null;
 
     switch ($step) {
         case 'ip':
             if ($command !== PAYLOAD_REQUIRED_IP) {
                 $output = "Invalid IP. Run ipconfig and enter {$state['cwd']} host address:";
-                return ['state' => $state, 'output' => $output, 'clear' => false];
+                $promptAgain = true;
+                $promptText = payload_prompt_for_step($step);
+                break;
             }
             $state['macro']['inputs']['ip'] = $command;
             $state['macro']['step'] = 'port';
-            $output = 'Enter Port Number:';
+            $promptText = payload_prompt_for_step('port');
+            $output = '';
             break;
         case 'port':
             if (!preg_match('/^\d{1,5}$/', $command)) {
                 $output = 'Port must be numeric. Enter Port Number:';
-                return ['state' => $state, 'output' => $output, 'clear' => false];
+                $promptAgain = true;
+                $promptText = payload_prompt_for_step($step);
+                break;
             }
             $state['macro']['inputs']['port'] = $command;
             $state['macro']['step'] = 'doc';
-            $output = 'Enter the name of the document (Do not include a file extension):';
+            $promptText = payload_prompt_for_step('doc');
+            $output = '';
             break;
         case 'doc':
             if ($command === '') {
                 $output = 'Document name cannot be empty. Enter the name of the document (without extension):';
-                return ['state' => $state, 'output' => $output, 'clear' => false];
+                $promptAgain = true;
+                $promptText = payload_prompt_for_step($step);
+                break;
             }
             $state['macro']['inputs']['doc'] = $command;
             $state['macro']['step'] = 'attack';
-            $output = <<<EOT
-
---------Select Attack---------
-1. Meterpreter Shell with Logon Persistence
-2. Meterpreter Shell with Powershell Profile Persistence (Requires user to be local admin)
-3. Meterpreter Shell with Alternate Data Stream Persistence
-4. Meterpreter Shell with Scheduled Task Persistence
-------------------------------
-Select Attack Number & Press Enter:
-EOT;
+            $output = "--------Select Attack---------\n1. Meterpreter Shell with Logon Persistence\n2. Meterpreter Shell with Powershell Profile Persistence (Requires user to be local admin)\n3. Meterpreter Shell with Alternate Data Stream Persistence\n4. Meterpreter Shell with Scheduled Task Persistence\n------------------------------";
+            $promptText = 'Select Attack Number & Press Enter: ';
             break;
         case 'attack':
             if (!in_array($command, ['1', '2', '3', '4'], true)) {
                 $output = 'Select a valid attack option (1-4) and press Enter:';
-                return ['state' => $state, 'output' => $output, 'clear' => false];
+                $promptAgain = true;
+                $promptText = payload_prompt_for_step($step);
+                break;
             }
             $state['macro']['inputs']['attack'] = $command;
             $state['macro']['step'] = 'payload';
-            $output = <<<EOT
-
---------Select Payload---------
-1. Meterpreter Reverse HTTPS
-2. Meterpreter Reverse HTTP
-------------------------------
-Select Payload Number & Press Enter:
-EOT;
+            $output = "--------Select Payload---------\n1. Meterpreter Reverse HTTPS\n2. Meterpreter Reverse HTTP\n------------------------------";
+            $promptText = 'Select Payload Number & Press Enter: ';
             break;
         case 'payload':
             if (!in_array($command, ['1', '2'], true)) {
                 $output = 'Select a valid payload option (1-2) and press Enter:';
-                return ['state' => $state, 'output' => $output, 'clear' => false];
+                $promptAgain = true;
+                $promptText = payload_prompt_for_step($step);
+                break;
             }
             $state['macro']['inputs']['payload'] = $command;
             $doc = $state['macro']['inputs']['doc'];
             $filename = $doc . '.xls';
             $state['trojan'] = $filename;
-            $state['macro']['active'] = false;
-            $state['macro']['step'] = null;
+            $state['macro'] = payload_macro_template();
             $state['complete'] = true;
             if (!in_array($filename, $state['files'], true)) {
                 $state['files'][] = $filename;
@@ -508,13 +541,19 @@ EOT;
             $output = "Saved to file {$state['cwd']}\\{$filename}";
             break;
         default:
-            $state['macro']['active'] = false;
-            $state['macro']['step'] = null;
+            $state['macro'] = payload_macro_template();
             $output = 'Macro builder aborted.';
             break;
     }
 
-    return ['state' => $state, 'output' => $output, 'clear' => false];
+    return [
+        'state' => $state,
+        'output' => $output === '' ? '' : normalize_terminal_output($output),
+        'clear' => false,
+        'prompt_again' => $promptAgain,
+        'prompt_text' => $promptText,
+        'awaiting_prompt' => $state['macro']['active'],
+    ];
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -534,6 +573,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     echo json_encode([
         'output' => $result['output'],
         'clear' => $result['clear'],
+        'prompt_again' => $result['prompt_again'] ?? false,
+        'prompt_text' => $result['prompt_text'] ?? null,
+        'awaiting_prompt' => $result['awaiting_prompt'] ?? false,
     ]);
     exit;
 }
@@ -725,32 +767,72 @@ render_header('Simulation Lab');
     ];
     intro.forEach(line => term.writeln(line));
 
-    let buffer = '';
-    const prompt = () => {
-        term.write('\r\n> ');
-        buffer = '';
-    };
-    prompt();
+    const missionPrompt = '> ';
+    let missionBuffer = '';
+    const missionHistory = [];
+    let missionHistoryIndex = 0;
+    let missionRowsRendered = 0;
 
-    if (term.onPaste) {
-        term.onPaste((data) => {
-            if (!data) return;
-            buffer += data;
-            term.write(data);
-        });
-    }
+    const moveCursorToMissionStart = () => {
+        if (missionRowsRendered > 0) {
+            term.write(`\x1b[${missionRowsRendered}F`);
+        }
+        term.write('\r');
+    };
+
+    const clearMissionRendered = () => {
+        moveCursorToMissionStart();
+        for (let i = 0; i <= missionRowsRendered; i++) {
+            term.write('\x1b[2K\r');
+            if (i < missionRowsRendered) {
+                term.write('\x1b[1B');
+            }
+        }
+        if (missionRowsRendered > 0) {
+            term.write(`\x1b[${missionRowsRendered}A`);
+        }
+    };
+
+    const renderMissionLine = () => {
+        clearMissionRendered();
+        term.write(`${missionPrompt}${missionBuffer}`);
+        const cols = term.cols || 80;
+        missionRowsRendered = Math.floor((missionPrompt.length + missionBuffer.length) / cols);
+    };
+
+    const writeMissionPrompt = (prependNewline = false) => {
+        missionBuffer = '';
+        missionHistoryIndex = missionHistory.length;
+        missionRowsRendered = 0;
+        if (prependNewline) {
+            term.write('\r\n');
+        }
+        term.write(missionPrompt);
+    };
+
+    writeMissionPrompt(false);
+
+    term.onPaste?.((data) => {
+        if (!data) return;
+        missionBuffer += data.replace(/\r/g, '');
+        renderMissionLine();
+    });
 
     term.onKey(({key, domEvent}) => {
         const printable = !domEvent.altKey && !domEvent.ctrlKey && !domEvent.metaKey;
         if (domEvent.key === 'Enter') {
-            const command = buffer.trim();
-            term.writeln('');
+            domEvent.preventDefault();
+            const commandText = missionBuffer;
+            clearMissionRendered();
+            term.write(`${missionPrompt}${commandText}\r\n`);
+            const command = missionBuffer.trim();
             if (command.length === 0) {
-                prompt();
+                writeMissionPrompt(false);
                 return;
             }
-            term.writeln('> ' + command);
-            window.fetch('/console.php', {
+            missionHistory.push(command);
+            missionHistoryIndex = missionHistory.length;
+            window.fetch('/simulation.php', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -765,28 +847,54 @@ render_header('Simulation Lab');
                     if (data.output) {
                         term.writeln(data.output);
                     }
-                    prompt();
+                    writeMissionPrompt(false);
                 })
                 .catch(() => {
                     term.writeln('Error: unable to reach the training host.');
-                    prompt();
+                    writeMissionPrompt(false);
                 });
         } else if (domEvent.key === 'Backspace') {
-            if (buffer.length > 0) {
-                term.write('\b \b');
-                buffer = buffer.slice(0, -1);
+            domEvent.preventDefault();
+            if (missionBuffer.length > 0) {
+                missionBuffer = missionBuffer.slice(0, -1);
+                renderMissionLine();
             }
+        } else if (domEvent.key === 'ArrowUp') {
+            domEvent.preventDefault();
+            if (missionHistory.length === 0) {
+                return;
+            }
+            if (missionHistoryIndex > 0) {
+                missionHistoryIndex -= 1;
+            }
+            missionBuffer = missionHistory[missionHistoryIndex] ?? '';
+            renderMissionLine();
+        } else if (domEvent.key === 'ArrowDown') {
+            domEvent.preventDefault();
+            if (missionHistoryIndex < missionHistory.length - 1) {
+                missionHistoryIndex += 1;
+                missionBuffer = missionHistory[missionHistoryIndex] ?? '';
+            } else {
+                missionHistoryIndex = missionHistory.length;
+                missionBuffer = '';
+            }
+            renderMissionLine();
+        } else if ((domEvent.ctrlKey || domEvent.metaKey) && domEvent.key.toLowerCase() === 'c') {
+            domEvent.preventDefault();
+            clearMissionRendered();
+            term.writeln('^C');
+            writeMissionPrompt(false);
         } else if ((domEvent.ctrlKey || domEvent.metaKey) && domEvent.key.toLowerCase() === 'v') {
             if (navigator.clipboard?.readText) {
                 navigator.clipboard.readText().then((text) => {
                     if (!text) return;
-                    buffer += text;
-                    term.write(text);
+                    missionBuffer += text.replace(/\r/g, '');
+                    renderMissionLine();
                 }).catch(() => {});
             }
         } else if (printable && key.length === 1) {
-            buffer += key;
-            term.write(key);
+            missionBuffer += key;
+            renderMissionLine();
         }
     });
 })();
@@ -905,36 +1013,168 @@ render_header('Simulation Lab');
     psTerm.writeln('Copyright (C) Microsoft Corporation. All rights reserved.');
     psTerm.writeln('');
 
-    let buffer = '';
-    const prompt = () => {
-        psTerm.write('\r\nPS C:\\Users\\Deep\\Desktop> ');
-        buffer = '';
-    };
-    prompt();
+    const payloadPrompt = 'PS C:\\Users\\Deep\\Desktop> ';
+    let payloadBuffer = '';
+    const payloadHistory = [];
+    let payloadHistoryIndex = 0;
+    let payloadAwaitingScriptInput = false;
+    let payloadRowsRendered = 0;
+    let payloadPromptText = payloadPrompt;
 
-    if (psTerm.onPaste) {
-        psTerm.onPaste((data) => {
-            if (!data) return;
-            buffer += data;
-            psTerm.write(data);
-        });
-    }
+    const moveCursorToPayloadStart = () => {
+        if (payloadRowsRendered > 0) {
+            psTerm.write(`\x1b[${payloadRowsRendered}F`);
+        }
+        psTerm.write('\r');
+    };
+
+    const clearPayloadRendered = () => {
+        moveCursorToPayloadStart();
+        for (let i = 0; i <= payloadRowsRendered; i++) {
+            psTerm.write('\x1b[2K\r');
+            if (i < payloadRowsRendered) {
+                psTerm.write('\x1b[1B');
+            }
+        }
+        if (payloadRowsRendered > 0) {
+            psTerm.write(`\x1b[${payloadRowsRendered}A`);
+        }
+    };
+
+    const currentPayloadPrompt = () => payloadPromptText;
+
+    const renderPayloadLine = () => {
+        clearPayloadRendered();
+        const promptText = currentPayloadPrompt();
+        psTerm.write(`${promptText}${payloadBuffer}`);
+        const cols = psTerm.cols || 80;
+        payloadRowsRendered = Math.floor((promptText.length + payloadBuffer.length) / cols);
+    };
+
+    const writePayloadPrompt = (prependNewline = false) => {
+        payloadBuffer = '';
+        payloadHistoryIndex = payloadHistory.length;
+        payloadRowsRendered = 0;
+        if (prependNewline) {
+            psTerm.write('\r\n');
+        }
+        psTerm.write(currentPayloadPrompt());
+    };
+
+    writePayloadPrompt(false);
+
+    psTerm.onPaste?.((data) => {
+        if (!data) return;
+        payloadBuffer += data.replace(/\r/g, '');
+        renderPayloadLine();
+    });
+
+    const sendPayloadCommand = (command) => {
+        window.fetch('/simulation.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({command, target: 'payload'}),
+        })
+            .then((resp) => resp.json())
+            .then((data) => {
+                if (data.clear) {
+                    psTerm.clear();
+                }
+                if (data.output) {
+                    psTerm.writeln(data.output);
+                }
+                const awaiting = !!data.awaiting_prompt;
+                if (data.prompt_text) {
+                    payloadPromptText = data.prompt_text;
+                } else if (!awaiting) {
+                    payloadPromptText = payloadPrompt;
+                }
+                payloadAwaitingScriptInput = awaiting;
+                if (payloadAwaitingScriptInput) {
+                    payloadBuffer = '';
+                    payloadHistoryIndex = payloadHistory.length;
+                    payloadRowsRendered = 0;
+                    renderPayloadLine();
+                }
+            })
+            .catch(() => {
+                psTerm.writeln('Error: unable to reach the payload lab.');
+                payloadAwaitingScriptInput = false;
+            })
+            .finally(() => {
+                if (!payloadAwaitingScriptInput) {
+                    payloadPromptText = payloadPrompt;
+                    writePayloadPrompt(false);
+                } else {
+                    payloadBuffer = '';
+                    payloadHistoryIndex = payloadHistory.length;
+                }
+            });
+    };
 
     psTerm.onKey(({key, domEvent}) => {
         const printable = !domEvent.altKey && !domEvent.ctrlKey && !domEvent.metaKey;
         if (domEvent.key === 'Enter') {
-            const command = buffer.trim();
-            psTerm.writeln('');
-            if (command.length === 0) {
-                prompt();
+            domEvent.preventDefault();
+            const commandText = payloadBuffer;
+            const activePrompt = currentPayloadPrompt();
+            clearPayloadRendered();
+            if (activePrompt) {
+                psTerm.write(`${activePrompt}${commandText}\r\n`);
+            } else if (commandText.length > 0) {
+                psTerm.write(`${commandText}\r\n`);
+            } else {
+                psTerm.write('\r\n');
+            }
+            const rawCommand = payloadBuffer;
+            const trimmed = rawCommand.trim();
+            if (trimmed.length === 0 && !payloadAwaitingScriptInput) {
+                writePayloadPrompt(false);
                 return;
             }
-            window.fetch('/console.php', {
+            if (trimmed.length > 0) {
+                payloadHistory.push(trimmed);
+                payloadHistoryIndex = payloadHistory.length;
+            }
+            sendPayloadCommand(rawCommand);
+        } else if (domEvent.key === 'Backspace') {
+            domEvent.preventDefault();
+            if (payloadBuffer.length > 0) {
+                payloadBuffer = payloadBuffer.slice(0, -1);
+                renderPayloadLine();
+            }
+        } else if (domEvent.key === 'ArrowUp') {
+            domEvent.preventDefault();
+            if (payloadHistory.length === 0) {
+                return;
+            }
+            if (payloadHistoryIndex > 0) {
+                payloadHistoryIndex -= 1;
+            }
+            payloadBuffer = payloadHistory[payloadHistoryIndex] ?? '';
+            renderPayloadLine();
+        } else if (domEvent.key === 'ArrowDown') {
+            domEvent.preventDefault();
+            if (payloadHistoryIndex < payloadHistory.length - 1) {
+                payloadHistoryIndex += 1;
+                payloadBuffer = payloadHistory[payloadHistoryIndex] ?? '';
+            } else {
+                payloadHistoryIndex = payloadHistory.length;
+                payloadBuffer = '';
+            }
+            renderPayloadLine();
+        } else if ((domEvent.ctrlKey || domEvent.metaKey) && domEvent.key.toLowerCase() === 'c') {
+            domEvent.preventDefault();
+            payloadBuffer = '';
+            payloadHistoryIndex = payloadHistory.length;
+            window.fetch('/simulation.php', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
                 },
-                body: new URLSearchParams({command, target: 'payload'}),
+                body: new URLSearchParams({command: '__CTRL_C__', target: 'payload'}),
             })
                 .then((resp) => resp.json())
                 .then((data) => {
@@ -944,28 +1184,26 @@ render_header('Simulation Lab');
                     if (data.output) {
                         psTerm.writeln(data.output);
                     }
-                    prompt();
                 })
                 .catch(() => {
                     psTerm.writeln('Error: unable to reach the payload lab.');
-                    prompt();
+                })
+                .finally(() => {
+                payloadAwaitingScriptInput = false;
+                payloadPromptText = payloadPrompt;
+                writePayloadPrompt(false);
                 });
-        } else if (domEvent.key === 'Backspace') {
-            if (buffer.length > 0) {
-                psTerm.write('\b \b');
-                buffer = buffer.slice(0, -1);
-            }
         } else if ((domEvent.ctrlKey || domEvent.metaKey) && domEvent.key.toLowerCase() === 'v') {
             if (navigator.clipboard?.readText) {
                 navigator.clipboard.readText().then((text) => {
                     if (!text) return;
-                    buffer += text;
-                    psTerm.write(text);
+                    payloadBuffer += text.replace(/\r/g, '');
+                    renderPayloadLine();
                 }).catch(() => {});
             }
         } else if (printable && key.length === 1) {
-            buffer += key;
-            psTerm.write(key);
+            payloadBuffer += key;
+            renderPayloadLine();
         }
     });
 })();

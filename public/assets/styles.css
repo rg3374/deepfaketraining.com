@@ -293,6 +293,11 @@ td {
     gap: 1.5rem;
 }
 
+.payload-panel h1,
+.console-wrapper h1 {
+    margin-top: 0;
+}
+
 .voicemail-form {
     display: flex;
     flex-direction: column;
