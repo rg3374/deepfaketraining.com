@@ -21,6 +21,12 @@ $progressStmt = $pdo->prepare('SELECT part2_completed, last_video_view FROM user
 $progressStmt->execute([$user['id']]);
 $progress = $progressStmt->fetch() ?: ['part2_completed' => 0, 'last_video_view' => null];
 
+$simulationProgress = simulation_progress_get((int)$user['id']);
+$simulationTaskLabels = simulation_progress_task_labels();
+$simulationCompleted = simulation_progress_completed_count($simulationProgress);
+$simulationTotalTasks = simulation_progress_total_tasks();
+$simulationPercent = (int)round(($simulationCompleted / max(1, $simulationTotalTasks)) * 100);
+
 $recentAttempts = $pdo->prepare(
     'SELECT s.title, sm.label, usa.is_correct, usa.attempted_at
      FROM user_scenario_attempts usa
@@ -65,6 +71,23 @@ render_header('Dashboard');
             <p>Last viewed: <?= h($progress['last_video_view']) ?></p>
         <?php endif; ?>
         <a class="btn" href="/video.php">Watch the briefing</a>
+    </div>
+    <div class="score-card">
+        <h2>Simulation Lab</h2>
+        <p><strong>Overall progress:</strong> <?= h((string)$simulationPercent) ?>% (<?= h((string)$simulationCompleted) ?> / <?= h((string)$simulationTotalTasks) ?> tasks)</p>
+        <ul class="task-progress-list" style="list-style:none; padding-left:0; margin:0 0 1rem;">
+            <?php foreach ($simulationTaskLabels as $taskKey => $label): ?>
+                <?php $taskComplete = simulation_progress_is_task_complete($simulationProgress, $taskKey); ?>
+                <?php $timestamp = simulation_progress_task_timestamp($simulationProgress, $taskKey); ?>
+                <li style="margin-bottom:0.4rem; display:flex; justify-content:space-between; gap:0.5rem;">
+                    <span><?= $taskComplete ? '✅' : '⬜' ?> <?= h($label) ?></span>
+                    <?php if ($taskComplete && $timestamp): ?>
+                        <small style="color:var(--muted, #5f6b7a); white-space:nowrap;"><?= h($timestamp) ?></small>
+                    <?php endif; ?>
+                </li>
+            <?php endforeach; ?>
+        </ul>
+        <a class="btn" href="/simulation.php">Resume simulation</a>
     </div>
 </section>
 

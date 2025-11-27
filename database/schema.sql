@@ -49,3 +49,14 @@ CREATE TABLE IF NOT EXISTS user_progress (
     CONSTRAINT fk_progress_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS simulation_progress (
+    user_id INT PRIMARY KEY,
+    payload_prepared_at TIMESTAMP NULL,
+    voicemail_generated_at TIMESTAMP NULL,
+    listener_started_at TIMESTAMP NULL,
+    phish_delivered_at TIMESTAMP NULL,
+    shell_caught_at TIMESTAMP NULL,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_simulation_progress_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+

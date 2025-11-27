@@ -54,6 +54,7 @@ try {
         'mime' => $audio['mime'],
         'audio' => $audio['audio'],
     ]);
+    simulation_progress_mark_for_current_user('voicemail_generated');
 } catch (Throwable $e) {
     http_response_code(500);
     error_log('TTS generation failed: ' . $e->getMessage() . "\n" . $e->getTraceAsString());

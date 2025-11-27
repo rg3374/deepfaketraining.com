@@ -15,6 +15,10 @@ const LISTENER_SHELL_PROMPT = '└─$ ';
 const LISTENER_SHELL_HEADER = '┌──(kali㉿kali)-[~/Downloads/Generate-Macro]';
 const LISTENER_MSF_PROMPT = 'msf > ';
 const LISTENER_MSF_EXPLOIT_PROMPT = 'msf exploit(multi/handler) > ';
+const METERPRETER_SENSITIVE_FILES = [
+    'Sensitive-Financials.xlsx',
+    'CEO-Briefing.docx',
+];
 
 function normalize_terminal_output(string $text): string
 {
@@ -200,6 +204,16 @@ function meterpreter_state(): array
 function meterpreter_save_state(array $state): void
 {
     $_SESSION[METERPRETER_STATE_KEY] = $state;
+}
+
+function simulation_task_state(array $progress, string $taskKey): string
+{
+    return simulation_progress_is_task_complete($progress, $taskKey) ? 'completed' : 'pending';
+}
+
+function simulation_task_status_text(array $progress, string $taskKey): string
+{
+    return simulation_progress_is_task_complete($progress, $taskKey) ? 'Completed' : 'Pending';
 }
 
 function payload_available_attachments(array $state): array
@@ -757,6 +771,7 @@ function payload_handle_macro_input(string $command, array $state): array
             $state['trojan'] = $filename;
             $state['macro'] = payload_macro_template();
             $state['complete'] = true;
+            simulation_progress_mark_for_current_user('payload_prepared');
             if (!in_array($filename, $state['files'], true)) {
                 $state['files'][] = $filename;
             }
@@ -969,6 +984,7 @@ function listener_start_handler(array $state): array
     $bind = $state['bind_host'] ?: '0.0.0.0';
     $lines[] = "[*] Started reverse TCP handler on {$bind}:{$state['lport']} ";
     $state['handler_waiting'] = true;
+    simulation_progress_mark_for_current_user('listener_started');
 
     return [
         'state' => $state,
@@ -1066,6 +1082,9 @@ function meterpreter_handle_command(string $command, array $state, array $phishS
             $output = "[*] Downloading: {$file} -> {$targetPath}\r\n"
                 . "[*] Downloaded 3.33 KiB of 3.33 KiB (100.0%): {$file} -> {$targetPath}\r\n"
                 . "[*] Completed  : {$file} -> {$targetPath}";
+            if (in_array($file, METERPRETER_SENSITIVE_FILES, true)) {
+                simulation_progress_mark_for_current_user('shell_caught');
+            }
             break;
         default:
             $output = "meterpreter: Unknown command '{$command}'.";
@@ -1169,6 +1188,7 @@ function phish_handle_call(array $input, array $state): array
     $state['phish']['call_timestamp'] = $callTimestamp;
     $state['phish']['call_script'] = $script;
     $state['phish']['call_voicemail'] = $voicemailLabel;
+    simulation_progress_mark_for_current_user('phish_delivered');
 
     return [
         'state' => $state,
@@ -1220,6 +1240,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $phishState = payload_state()['phish'] ?? [];
         $result = meterpreter_handle_command($command, $meterpreter, $phishState);
         meterpreter_save_state($result['state']);
+    } elseif ($target === 'simulation_progress_status') {
+        $user = current_user();
+        $progress = simulation_progress_get((int)$user['id']);
+        $tasks = [];
+        foreach (SIMULATION_TASK_COLUMNS as $taskKey => $column) {
+            $tasks[$taskKey] = [
+                'completed' => !empty($progress[$column]),
+                'timestamp' => $progress[$column],
+            ];
+        }
+        echo json_encode(['tasks' => $tasks]);
+        exit;
     } else {
         $state = console_state();
         $result = handle_console_command($command, $state);
@@ -1238,6 +1270,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $state = console_state();
 $payloadState = payload_state();
+$currentUser = current_user();
+$simulationProgress = simulation_progress_get((int)$currentUser['id']);
 $voicePresets = $config['app']['tts_presets'] ?? [];
 $defaultVoiceName = $config['app']['tts_voice']['name'] ?? '';
 $defaultVoiceConfig = $config['app']['tts_voice'] ?? [];
@@ -1266,6 +1300,45 @@ $meterpreterReady = ($phishState['sent'] ?? false) && ($phishState['call_sent'] 
 
 render_header('Simulation Lab');
 ?>
+<style>
+.task-status-anchor {
+    position: relative;
+}
+.task-status-chip {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 999px;
+    background: rgba(5, 6, 10, 0.65);
+    border: 1px solid currentColor;
+}
+.task-status-chip[data-state="completed"] {
+    color: #14b886;
+}
+.task-status-chip[data-state="pending"] {
+    color: #f97316;
+}
+.task-status-refresh {
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+}
+.task-status-refresh:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+</style>
 <section class="panel">
     <h1>Deepfake Social Engineering Simulation</h1>
     <p>
@@ -1285,8 +1358,16 @@ render_header('Simulation Lab');
 </section>
 
 <section class="panel payload-panel">
-    <div>
+    <div class="task-status-anchor">
         <h1>Prepare Payload</h1>
+        <div
+            class="task-status-chip"
+            data-task="payload_prepared"
+            data-state="<?= simulation_task_state($simulationProgress, 'payload_prepared') ?>"
+        >
+            <span class="task-status-text"><?= simulation_task_status_text($simulationProgress, 'payload_prepared') ?></span>
+            <button type="button" class="task-status-refresh" data-task="payload_prepared" aria-label="Refresh payload task status">⟳</button>
+        </div>
         <p>
             Craft the malicious spreadsheet that accompanies your social engineering narrative.
             Use this contained PowerShell environment to discover the host's public IP, fetch the
@@ -1330,8 +1411,16 @@ render_header('Simulation Lab');
 </section>
 
 <section class="panel voicemail-card">
-    <div>
+    <div class="task-status-anchor">
         <h2>Generate Voicemail</h2>
+        <div
+            class="task-status-chip"
+            data-task="voicemail_generated"
+            data-state="<?= simulation_task_state($simulationProgress, 'voicemail_generated') ?>"
+        >
+            <span class="task-status-text"><?= simulation_task_status_text($simulationProgress, 'voicemail_generated') ?></span>
+            <button type="button" class="task-status-refresh" data-task="voicemail_generated" aria-label="Refresh voicemail task status">⟳</button>
+        </div>
         <p>
             Feed the AI voice actor with your own script to simulate phishing voicemails.
             <span class="voicemail-warning intro-scale-note">
@@ -1418,8 +1507,16 @@ render_header('Simulation Lab');
     </div>
 </section>
 <section class="panel">
-    <div>
+    <div class="task-status-anchor">
         <h2>Start Listener</h2>
+        <div
+            class="task-status-chip"
+            data-task="listener_started"
+            data-state="<?= simulation_task_state($simulationProgress, 'listener_started') ?>"
+        >
+            <span class="task-status-text"><?= simulation_task_status_text($simulationProgress, 'listener_started') ?></span>
+            <button type="button" class="task-status-refresh" data-task="listener_started" aria-label="Refresh listener task status">⟳</button>
+        </div>
         <p>
             Bring up a simulated Kali terminal and arm <code class="command-hint">msfconsole</code> to catch the returning shell.
             Configure the multi/handler module with the same callback IP/port you embedded in the payload,
@@ -1442,8 +1539,16 @@ render_header('Simulation Lab');
     </div>
 </section>
 <section class="panel phish-panel">
-    <div>
+    <div class="task-status-anchor">
         <h2>Deliver the Phish</h2>
+        <div
+            class="task-status-chip"
+            data-task="phish_delivered"
+            data-state="<?= simulation_task_state($simulationProgress, 'phish_delivered') ?>"
+        >
+            <span class="task-status-text"><?= simulation_task_status_text($simulationProgress, 'phish_delivered') ?></span>
+            <button type="button" class="task-status-refresh" data-task="phish_delivered" aria-label="Refresh phish task status">⟳</button>
+        </div>
         <p>
             With the payload staged and listener armed, send a high-pressure email that references the voicemail
             and slips the malicious spreadsheet to <code class="command-hint">jdoe@zegodefense.com</code>.
@@ -1530,8 +1635,16 @@ render_header('Simulation Lab');
     </div>
 </section>
 <section class="panel">
-    <div>
+    <div class="task-status-anchor">
         <h2>Catch the Shell</h2>
+        <div
+            class="task-status-chip"
+            data-task="shell_caught"
+            data-state="<?= simulation_task_state($simulationProgress, 'shell_caught') ?>"
+        >
+            <span class="task-status-text"><?= simulation_task_status_text($simulationProgress, 'shell_caught') ?></span>
+            <button type="button" class="task-status-refresh" data-task="shell_caught" aria-label="Refresh shell task status">⟳</button>
+        </div>
         <p>
             Once the target opens the malicious workbook, the staged listener hands you a Meterpreter console.
             Use it to validate that your payload executed successfully and run <code class="command-hint">download &lt;filename&gt;</code> to exfiltrate sensitive files from <code class="command-hint">C:\Users\jdoe\Desktop</code>.
@@ -1580,6 +1693,47 @@ document.addEventListener('DOMContentLoaded', () => {
         note.style.width = 'fit-content';
     });
 });
+(() => {
+    const statusButtons = document.querySelectorAll('.task-status-refresh');
+    const updateChips = (tasks) => {
+        document.querySelectorAll('.task-status-chip').forEach((chip) => {
+            const task = chip.dataset.task;
+            const taskInfo = tasks?.[task];
+            if (!taskInfo) return;
+            const completed = !!taskInfo.completed;
+            chip.dataset.state = completed ? 'completed' : 'pending';
+            const textEl = chip.querySelector('.task-status-text');
+            if (textEl) {
+                textEl.textContent = completed ? 'Completed' : 'Pending';
+            }
+        });
+    };
+    statusButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            if (button.disabled) return;
+            button.disabled = true;
+            fetch('/simulation.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({target: 'simulation_progress_status'}),
+            })
+                .then((resp) => resp.json())
+                .then((data) => {
+                    if (data?.tasks) {
+                        updateChips(data.tasks);
+                    }
+                })
+                .catch(() => {
+                    // ignore refresh errors
+                })
+                .finally(() => {
+                    button.disabled = false;
+                });
+        });
+    });
+})();
 const VOICEMAIL_STORAGE_KEY = 'dft_voicemail_bank';
 const MAX_VOICEMAILS = 10;
 const MAX_VOICEMAIL_SECONDS = 45;
