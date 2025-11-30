@@ -166,7 +166,7 @@ A. “You sound fake, are you even real?”
 
 **Correct answer:** A
 
-### **8\. Which are audio clues that might indicate a deepfake voice**
+### **8\. Which are audio clues that might indicate a deepfake voice? **
 
 * No natural breathing  
 * Perfect, even pacing  
@@ -175,9 +175,7 @@ A. “You sound fake, are you even real?”
 
    **Correct answer:** All of above
 
-### **9\. Which is a behavioral clue that a caller may be using synthetic audio.**
-
-**Sample answers:**
+### **9\. Which is a behavioral clue that a caller may be using synthetic audio? **
 
 * Avoiding verification questions  
 * Giving repetitive or irrelevant answers  
