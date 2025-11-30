@@ -83,8 +83,8 @@ Follow your supervisor or fraud team procedure.
 
 ### MODULE 5 — Short Practice Exercise (10–15 minutes)
 
-Play clips (mix of real and synthetic) from Part 1 · Warmup from deepfaketraining.net
-For each clip, checkboxes for:
+Play clips (mix of real and synthetic) from Part 1 · Warmup from deepfaketraining.net. 
+For each clip, ask participants to identify :
 
 1. Real or synthetic?  
 2. Would you escalate this call?
@@ -97,11 +97,11 @@ For each clip, checkboxes for:
 2. Is the behavior inconsistent or evasive?  
 3. Is something “off” about timing, emotion, or response?
 
-### MODULE 7 — Core Technologies and Software Tools (5 minutes)
+### MODULE 7 — Core Technologies and Software Tools (15 minutes)
 
 Ask participants to complete Part 4 · Deepfake Defense Resources from deepfaketraining.net
 
-### Deepfake Audio Detection — Call Center Staff Quiz
+### Deepfake Audio Detection — Call Center Staff Quiz (10 minutes)
 
 ### **1\. Which of the following is a common sign of a synthetic (AI-generated) voice?**
 
